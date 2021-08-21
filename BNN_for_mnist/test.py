@@ -64,22 +64,28 @@ class NN(nn.Module):
     
     def __init__(self, batch_size, hidden_1, hidden_2, output_size):
         super(NN, self).__init__()
-        self.fc1 = nn.Linear(28*28, hidden_2)
+        self.fc1 = nn.Linear(32*16*16, hidden_2)
         self.hidden_1 = hidden_1
-        self.conv2 = nn.Conv2d(in_channels=1, out_channels=hidden_1, kernel_size=3)
-        self.out = nn.Linear(hidden_2, output_size)
+        self.batch_norm_1 = nn.BatchNorm2d(hidden_1)
+        self.conv2 = nn.Conv2d(in_channels=1, out_channels=hidden_1, kernel_size=7,stride=1)
+        self.conv2_2 = nn.Conv2d(in_channels=hidden_1, out_channels=32, kernel_size = 7)
+        self.batch_norm_2 = nn.BatchNorm2d(32)
+        self.out = nn.Linear(32*16*16, output_size)
         
     def forward(self, x):
-        #output = self.conv2(x)
-        #output = F.relu(output)
-        #output = output.view(-1, 26*26*self.hidden_1)
-        x = x.view(-1, 28*28)
-        output = self.fc1(x)
+        output = self.batch_norm_1(self.conv2(x))
         output = F.relu(output)
+        output = self.batch_norm_2(self.conv2_2(output))
+        output = F.relu(output)
+        output = output.flatten(1)
+        # x = x.view(-1, 28*28)
+        # output = self.fc1(output)
+        # output = F.relu(output)
         output = self.out(output)
+        output = F.log_softmax(output, dim=1)
         return output
 
-net = NN(32, 16, 256, 10)
+net = NN(32, 16, 64, 10)
 log_softmax = nn.LogSoftmax(dim=1)
 
 # pyro:SVI: model
@@ -88,12 +94,13 @@ def model(x_data, y_data):
     fc1w_prior = Normal(loc=torch.zeros_like(net.fc1.weight), scale=torch.ones_like(net.fc1.weight))
     fc1b_prior = Normal(loc=torch.zeros_like(net.fc1.bias), scale=torch.ones_like(net.fc1.bias))
     conv2w_prior = Normal(loc=torch.zeros_like(net.conv2.weight), scale=torch.ones_like(net.conv2.weight))
-    conv2b_prior = Normal(loc=torch.zeros_like(net.conv2.bias), scale=torch.ones_like(net.conv2.bias))
+    conv2w2_prior = Normal(loc=torch.zeros_like(net.conv2_2.weight), scale=torch.ones_like(net.conv2_2.weight))
+    #conv2b_prior = Normal(loc=torch.zeros_like(net.conv2.bias), scale=torch.ones_like(net.conv2.bias))
 
     outw_prior = Normal(loc=torch.zeros_like(net.out.weight), scale=torch.ones_like(net.out.weight))
     outb_prior = Normal(loc=torch.zeros_like(net.out.bias), scale=torch.ones_like(net.out.bias))
     
-    priors = {'fc1.weight': fc1w_prior, 'fc1.bias': fc1b_prior, 'conv2.weight':conv2w_prior, 'conv2.bias': conv2b_prior, 'out.weight': outw_prior, 'out.bias': outb_prior}
+    priors = {'fc1.weight': fc1w_prior, 'fc1.bias': fc1b_prior,  'conv2_w': conv2w_prior, 'conv2_w2':conv2w2_prior,'out.weight': outw_prior, 'out.bias': outb_prior}
     # lift module parameters to random variables sampled from the priors
     lifted_module = pyro.random_module("module", net, priors)
     # sample a regressor (which also samples w and b)
@@ -121,12 +128,19 @@ def guide(x_data, y_data):
     conv2w_mu_param = pyro.param("conv2w_mu", conv2w_mu)
     conv2w_sigma_param = softplus(pyro.param("conv2w_sigma", conv2w_sigma))
     conv2w_prior = Normal(loc=conv2w_mu_param, scale=conv2w_sigma_param)
-    # conv2 layer bias distribution priors
-    conv2b_mu = torch.randn_like(net.conv2.bias)
-    conv2b_sigma = torch.randn_like(net.conv2.bias)
-    conv2b_mu_param = pyro.param("conv2b_mu", conv2b_mu)
-    conv2b_sigma_param = softplus(pyro.param("conv2b_sigma", conv2b_sigma))
-    conv2b_prior = Normal(loc=conv2b_mu_param, scale=conv2b_sigma_param)
+
+    conv2w2_mu = torch.randn_like(net.conv2_2.weight)
+    conv2w2_sigma = torch.randn_like(net.conv2_2.weight)
+    conv2w2_mu_param = pyro.param("conv2w2_mu", conv2w2_mu)
+    conv2w2_sigma_param = softplus(pyro.param("conv2w2_sigma", conv2w2_sigma))
+    conv2w2_prior = Normal(loc=conv2w2_mu_param, scale=conv2w2_sigma_param)
+    # # conv2 layer bias distribution priors
+    
+    # conv2b_mu = torch.randn_like(net.conv2.bias)
+    # conv2b_sigma = torch.randn_like(net.conv2.bias)
+    # conv2b_mu_param = pyro.param("conv2b_mu", conv2b_mu)
+    # conv2b_sigma_param = softplus(pyro.param("conv2b_sigma", conv2b_sigma))
+    # conv2b_prior = Normal(loc=conv2b_mu_param, scale=conv2b_sigma_param)
     # First layer bias distribution priors
     fc1b_mu = torch.randn_like(net.fc1.bias)
     fc1b_sigma = torch.randn_like(net.fc1.bias)
@@ -145,16 +159,16 @@ def guide(x_data, y_data):
     outb_mu_param = pyro.param("outb_mu", outb_mu)
     outb_sigma_param = softplus(pyro.param("outb_sigma", outb_sigma))
     outb_prior = Normal(loc=outb_mu_param, scale=outb_sigma_param)
-    priors = {'fc1.weight': fc1w_prior, 'fc1.bias': fc1b_prior, 'conv2.weight': conv2w_prior, 'conv2.bias': conv2b_prior, 'out.weight': outw_prior, 'out.bias': outb_prior}
+    priors = {'fc1.weight': fc1w_prior, 'fc1.bias': fc1b_prior,  'conv2_w': conv2w_prior, 'conv2_w2':conv2w2_prior, 'out.weight': outw_prior, 'out.bias': outb_prior}
     
     lifted_module = pyro.random_module("module", net, priors)
     
     return lifted_module()
 
-optim = Adam({"lr": 0.01})
+optim = Adam({"lr": 0.001})
 svi = SVI(model, guide, optim, loss=Trace_ELBO())
 
-num_iterations = 10
+num_iterations = 5
 loss = 0
 
 for j in range(num_iterations):
