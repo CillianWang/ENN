@@ -63,10 +63,18 @@ class NN(nn.Module):
 
         self.conv2_mu = nn.Parameter(torch.randn(hidden_1, 1, 7, 7))
         self.conv2_sigma = nn.Parameter(torch.randn(hidden_1, 1, 7, 7))
+        self.conv2_2mu = nn.Parameter(torch.randn(32,16,7,7))
+        self.conv2_2sigma = nn.Parameter(torch.randn(32,16,7,7))
+        self.fc_mu = nn.Parameter(torch.randn(64,8192))
+        self.fc_sigma = nn.Parameter(torch.randn(64,8192))
         
     def forward(self, x):
         conv2_w_prior = nn.Parameter(torch.normal(mean=torch.zeros_like(self.conv2.weight), std=torch.ones_like(self.conv2.weight)))
         self.conv2.weight = nn.Parameter(conv2_w_prior*self.conv2_sigma + self.conv2_mu)
+        conv2_2w_prior = nn.Parameter(torch.normal(mean=torch.zeros_like(self.conv2_2.weight), std=torch.ones_like(self.conv2_2.weight)))
+        self.conv2_2.weight = nn.Parameter(conv2_2w_prior*self.conv2_2sigma + self.conv2_2mu)
+        fc_prior = nn.Parameter(torch.normal(mean=torch.zeros_like(self.fc1.weight), std=torch.ones_like(self.fc1.weight)))
+        self.fc1.weight = nn.Parameter(fc_prior * self.fc_sigma + self.fc_mu)
 
         output = self.batch_norm_1(self.conv2(x))
         output = F.relu(output)
@@ -88,20 +96,24 @@ def KL_2gaussian(mu1, sig1, mu2, sig2):
 
 
 net = NN(32, 16, 64, 10)
-optimizer = optim.Adadelta(net.parameters(), lr=0.001)
+optimizer = optim.Adadelta(net.parameters(), lr=0.0005)
 log_softmax = nn.LogSoftmax(dim=1)
 kernel_mu = torch.zeros_like(net.conv2.weight)
 kernel_sigma = torch.ones_like(net.conv2.weight)
+kernel_2mu = torch.zeros_like(net.conv2_2.weight)
+kernel_2sigma = torch.ones_like(net.conv2_2.weight)
+kernel_fc_mu = torch.zeros_like(net.fc1.weight)
+kernel_fc_sigma = torch.ones_like(net.fc1.weight)
 
 kl = KL_2gaussian(net.conv2_mu, net.conv2_sigma, kernel_mu, kernel_sigma)
 
-def train(model, train_data, optimizer, epoch):
+def train(model, train_data, optimizer, lumbda):
     model.train()
     for batch_id, data in enumerate(train_data):
         optimizer.zero_grad()
         output = model(data[0])
         # Now the KL_div.shape would be (16,1,7,7), for each parameter has a loss, now I compute the mean
-        loss = F.nll_loss(output, data[1])  + KL_2gaussian(net.conv2_mu, net.conv2_sigma, kernel_mu, kernel_sigma)
+        loss = F.nll_loss(output, data[1])  + lumbda*KL_2gaussian(net.conv2_mu, net.conv2_sigma, kernel_mu, kernel_sigma) + lumbda*KL_2gaussian(net.conv2_2mu, net.conv2_2sigma, kernel_2mu, kernel_2sigma)+lumbda*KL_2gaussian(net.fc_mu, net.fc_sigma, kernel_fc_mu, kernel_fc_sigma)
         loss.backward()
         optimizer.step()
 
@@ -123,7 +135,9 @@ def test(model, test_data):
 
 
 scheduler = StepLR(optimizer, step_size=1)
-for epoch in range(1, 6):
-    train(net, train_loader, optimizer, epoch)
+for epoch in range(1, 16):
+    train(net, train_loader, optimizer, lumbda=0.9)
     test(net, test_loader)
     scheduler.step()
+
+pass
