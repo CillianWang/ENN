@@ -34,14 +34,19 @@ class ENN(nn.Module):
         self.a_mu.requires_grad = True
         self.a_sigma = nn.Parameter(torch.randn(1))
         self.a_sigma.requires_grad = True
+        self.b_mu = nn.Parameter(torch.randn(1))
+        self.b_mu.requires_grad = True
+        self.b_sigma = nn.Parameter(torch.randn(1))
+        self.b_sigma.requires_grad = True
+
         # self.M = M
         self.z_mu = z_mu
         self.z_sigma = z_sigma
 
         # Linear layer regression:
         self.depth = 64
-        self.linear1 = nn.Linear(1, self.depth, bias=False)
-        self.linear2 = nn.Linear(self.depth, 1, bias=False)
+        self.linear1 = nn.Linear(1, self.depth, bias=True)
+        self.linear2 = nn.Linear(self.depth, 1, bias=True)
 
         self.mu1 = nn.Parameter(torch.randn(self.depth, 1))
         self.mu1.requires_grad = True
@@ -73,13 +78,14 @@ class ENN(nn.Module):
 
         #return output/self.M
         x = torch.from_numpy(np.array(x).reshape(1,1))
-        output = F.relu((linear1_prior * self.sigma1)*x).reshape(1, self.depth) + self.linear1(x.float())
+        output = ((linear1_prior * self.sigma1)*x).reshape(1, self.depth) + self.linear1(x.float())
         output = self.linear2(output.float()) + torch.mm(output.float(),(linear2_prior * self.sigma2).reshape(self.depth,1))
+        output = output + torch.normal(mean=self.z_mu,std=torch.Tensor([self.z_sigma]))*self.b_sigma +self.b_mu
         return output
 
 
 a = 1
-net = ENN(0, 0).float()
+net = ENN(0, 0.5).float()
 b = net(a)
 
 
@@ -110,7 +116,7 @@ def train(model, train_data, optimizer, noise):
     for data in train_data:
         optimizer.zero_grad()
         output = model(data)
-        loss = KL_2gaussian(net.mu1, net.sigma1, kernel_2mu, kernel_2sigma) +  KL_2gaussian(net.mu2, net.sigma2, kernel_2mu, kernel_2sigma)+ torch.square(output-torch.tensor(data)*5-noise[index])
+        loss = KL_2gaussian(net.mu1, net.sigma1, kernel_2mu, kernel_2sigma) +  KL_2gaussian(net.mu2, net.sigma2, kernel_2mu, kernel_2sigma)+ torch.square(output-torch.tensor(data)*5-noise[index]-100)
         # loss = torch.square(output-torch.tensor(data)*5-noise[index])
         loss.backward()
         optimizer.step()
@@ -135,7 +141,10 @@ for i in x:
     # simple estimation:
     # alpha = torch.normal(mean = net.a_mu, std = abs(net.a_sigma))
     # y.append(float(alpha)*i)
-    y.append(net(i))
+    out = 0
+    for m in range(10):
+        out += net(i)
+    y.append(out/10)
     pass
 
 plt.subplot(121)
