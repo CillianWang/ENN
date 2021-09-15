@@ -46,6 +46,8 @@ class ENN(nn.Module):
         # Linear layer regression:
         self.depth = 64
         self.linear1 = nn.Linear(1, self.depth, bias=True)
+        self.linearH1 = nn.Linear(self.depth, 2*self.depth, bias=True)
+        self.linearH2 = nn.Linear(2*self.depth, self.depth, bias=True)
         self.linear2 = nn.Linear(self.depth, 1, bias=True)
 
         self.mu1 = nn.Parameter(torch.randn(self.depth, 1))
@@ -56,6 +58,10 @@ class ENN(nn.Module):
         self.sigma1.requires_grad = True
         self.sigma2 = nn.Parameter(torch.randn(1, self.depth))
         self.sigma2.requires_grad = True
+        self.sigmaH1 = nn.Parameter(torch.randn(2*self.depth, self.depth))
+        self.sigmaH1.requires_grad = True
+        self.sigmaH2 = nn.Parameter(torch.randn(self.depth, 2*self.depth))
+        self.sigmaH2.requires_grad = True
 
 
 
@@ -68,6 +74,8 @@ class ENN(nn.Module):
         linear2_prior = torch.normal(mean=torch.zeros_like(self.linear2.weight)+self.z_mu, std=torch.ones_like(self.linear2.weight)*self.z_sigma)
         # self.linear2.weight = nn.Parameter((linear2_prior * self.sigma2 + self.linear2.weight))
 
+        linearH1_prior = torch.normal(mean=torch.zeros_like(self.linearH1.weight)+self.z_mu, std=torch.ones_like(self.linearH1.weight)*self.z_sigma)
+        linearH2_prior = torch.normal(mean=torch.zeros_like(self.linearH2.weight)+self.z_mu, std=torch.ones_like(self.linearH2.weight)*self.z_sigma)
 
         # for i in range(self.M):
         # # simple y = a*x regression:
@@ -79,13 +87,15 @@ class ENN(nn.Module):
         #return output/self.M
         x = torch.from_numpy(np.array(x).reshape(1,1))
         output = ((linear1_prior * self.sigma1)*x).reshape(1, self.depth) + self.linear1(x.float())
+        output = torch.mm((linearH1_prior * self.sigmaH1).float(), torch.transpose(output,0,1).float()).reshape(1, 2*self.depth) + self.linearH1(output.float())
+        output = torch.mm((linearH2_prior * self.sigmaH2).float(), torch.transpose(output,0,1).float()).reshape(1, self.depth) + self.linearH2(output.float())
         output = self.linear2(output.float()) + torch.mm(output.float(),(linear2_prior * self.sigma2).reshape(self.depth,1))
         output = output + torch.normal(mean=self.z_mu,std=torch.Tensor([self.z_sigma]))*self.b_sigma +self.b_mu
         return output
 
 
 a = 1
-net = ENN(0, 0.5).float()
+net = ENN(0, 0.1).float()
 b = net(a)
 
 
@@ -125,7 +135,7 @@ def train(model, train_data, optimizer, noise):
 
     # print(net.a_mu, net.a_sigma)
 
-for i in range(15):
+for i in range(5):
     train(net, x, optimizer, noise)
 
 
@@ -142,16 +152,16 @@ for i in x:
     # alpha = torch.normal(mean = net.a_mu, std = abs(net.a_sigma))
     # y.append(float(alpha)*i)
     out = 0
-    for m in range(10):
+    for m in range(100):
         out += net(i)
-    y.append(out/10)
+    y.append(out/100)
     pass
 
 plt.subplot(121)
 plt.plot(x,y, color='red')
 plt.title("estimated")
 plt.subplot(122)
-plt.plot(x,5*x+noise, color="blue")
+plt.plot(x,5*x+noise+100, color="blue")
 plt.title("origin")
 plt.show()
 pass
