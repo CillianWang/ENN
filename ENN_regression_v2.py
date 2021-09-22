@@ -1,6 +1,7 @@
 #### Epistemic Neural network regression model, with linear modules
 
 
+from os import X_OK
 import torch
 import math
 import torch.nn as nn
@@ -13,11 +14,18 @@ import torch.nn as nn
 # device = torch.device("cuda" if torch.cuda.is_available else "cpu")
 
 # creating signal and noise
-x = np.linspace(-10,10, 1000) # step would be 0.021
+x_i = np.linspace(-10,10, 1000) # step would be 0.021
+a = x_i[0:500]
+b = x_i[699:999]
+x = np.hstack((a,b))
 
 noise = np.random.normal(0, 1, 1000)
-noise_index = np.where(x<3, 1, 7)
+noise_index = np.where(x_i<7, 1, 10)
 noise = noise_index*noise
+
+noise_mask = np.random.normal(0, 1, 800)
+noise_index = np.where(x<7, 1, 10)
+noise_mask = noise_index*noise_mask
 
 
 class ENN(nn.Module):
@@ -32,7 +40,8 @@ class ENN(nn.Module):
         self.z_sigma = z_sigma
         self.w_mu1, self.w_sigma1, self.b_mu1, self.b_sigma1 = self.Linear_parameter(1, l1)
         self.w_mu2, self.w_sigma2, self.b_mu2, self.b_sigma2 = self.Linear_parameter(l1, l2)
-        self.w_mu3, self.w_sigma3, self.b_mu3, self.b_sigma3 = self.Linear_parameter(l2, 1)       
+        self.w_mu3, self.w_sigma3, self.b_mu3, self.b_sigma3 = self.Linear_parameter(l2, l3)
+        self.w_mu4, self.w_sigma4, self.b_mu4, self.b_sigma4 = self.Linear_parameter(l3, 1)    
         # self.w_mu3, self.w_sigma3, self.b_mu3, self.b_sigma3 = self.Linear_parameter(l2, l3)
         # self.w_mu4, self.w_sigma4, self.b_mu4, self.b_sigma4 = self.Linear_parameter(l3, l4)
         # self.w_mu5, self.w_sigma5, self.b_mu5, self.b_sigma5 = self.Linear_parameter(l4, 1)
@@ -75,7 +84,7 @@ class ENN(nn.Module):
         w = w_sigma*w_prior+w_mu
         b = b_sigma*b_prior+b_mu
 
-        loss = self.KL_2gaussian(w_mu, w_sigma, torch.zeros_like(w_shape), 0.01*torch.ones_like(w_sigma))
+        loss = self.KL_2gaussian(w_mu, w_sigma, torch.zeros_like(w_shape), torch.ones_like(w_sigma))
 
         output = torch.mm(x.double(), w.double()) + b.double()
 
@@ -89,26 +98,29 @@ class ENN(nn.Module):
         # Calling modules to do linear layers:
         output, loss = self.Linear(x, self.w_mu1, self.w_sigma1, self.b_mu1, self.b_sigma1)
         kl_loss += loss
+        output = F.relu(output)
 
         output, loss = self.Linear(output, self.w_mu2, self.w_sigma2, self.b_mu2, self.b_sigma2)
         kl_loss += loss
+        output = torch.sigmoid(output)
 
         output, loss = self.Linear(output, self.w_mu3, self.w_sigma3, self.b_mu3, self.b_sigma3)
         kl_loss += loss
-
-        # output, loss = self.Linear(output, self.w_mu4, self.w_sigma4, self.b_mu4, self.b_sigma4)
+        
+        # output = F.sigmoid(output)
+        output, loss = self.Linear(output, self.w_mu4, self.w_sigma4, self.b_mu4, self.b_sigma4)
         # kl_loss += loss
-
+        # output = F.relu(output)
         # output, loss = self.Linear(output, self.w_mu5, self.w_sigma5, self.b_mu5, self.b_sigma5)
         # kl_loss += loss
-        kl_loss = kl_loss/(self.l1+self.l1+self.l2*self.l1)
+        kl_loss = kl_loss/(self.l1+self.l1+self.l2+self.l2*self.l1)
         
         # kl_loss = kl_loss/(self.l1 + self.l2 + self.l3 + self.l4 +self.l1+self.l2*self.l1+self.l2*self.l3 + self.l3*self.l4)
         return output, kl_loss
 
 
 a = 1
-net = ENN(0, 0.01, 64, 128, 64, 32)
+net = ENN(0, 0.001, 32, 64, 32, 16)
 b, c = net(a)
 
 
@@ -126,16 +138,18 @@ def train(model, train_data, optimizer, noise):
     for data in train_data:
         optimizer.zero_grad()
         output, kl = model(data)
-        loss = torch.square(output-torch.tensor(data)*5-noise[index]-100)
+        loss = torch.square(output-torch.tensor(data)*torch.tensor(data)-noise[index]-100) + kl
         # loss = torch.square(output-torch.tensor(data)*5-noise[index])
         loss.backward()
         optimizer.step()
         index += 1
+        if index%200 == 0:
+            print(loss)
         # print(loss)
 
     # print(net.a_mu, net.a_sigma)
 
-for i in range(15):
+for i in range(100):
     train(net, x, optimizer, noise)
 
 # kl = KL_2gaussian(torch.abs(net.a_mu), torch.abs(net.a_sigma), torch.tensor(4.5), torch.tensor(0.5))
@@ -144,22 +158,22 @@ for i in range(15):
 
 # Now show some figure of this regression:
 y = []
-for i in x:
+for i in np.linspace(-10, 10, 1000):
     # simple estimation:
     # alpha = torch.normal(mean = net.a_mu, std = abs(net.a_sigma))
     # y.append(float(alpha)*i)
     out = 0
-    for m in range(100):
+    for m in range(1):
         out_t,loss = net(i)
         out += out_t
-    y.append(out/100)
+    y.append(out/1)
     pass
 
 plt.subplot(121)
-plt.plot(x,y, color='red')
+plt.scatter(np.linspace(-10, 10, 1000),np.array(y), color="red", s = 1)
 plt.title("estimated")
 plt.subplot(122)
-plt.plot(x,5*x+noise+100, color="blue")
+plt.scatter(x,x*x+noise_mask+100, color="blue")
 plt.title("origin")
 plt.show()
 pass
