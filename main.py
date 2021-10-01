@@ -8,14 +8,16 @@ from DataLoader import HaaglandenDataset, getDataLoaders
 import torch.optim as optim
 # from RecordingLoader import HaaglandenDataset_truth, getDataLoaders_truth
 from Library.Models.CNN import Passthrough
+from Library.cb_loss import CB_loss, count_class
+
 
 # cuda device:
 
 Train_Data = HaaglandenDataset("Train")
 # Train_Truth = HaaglandenDataset_truth("Train")
 
-
-dataloader = DataLoader(Train_Data, batch_size=32,shuffle=False,drop_last=False)
+batch_size =32
+dataloader = DataLoader(Train_Data, batch_size=batch_size,shuffle=False,drop_last=False)
 # recordingloader = DataLoader(Train_Truth, batch_size=32,shuffle=False, drop_last=False)
 
 model = Passthrough().to("cuda")
@@ -35,7 +37,13 @@ def train(dataloader, batch_size, epochs):
             optimizer.zero_grad()
             output = model(dl)
 
-            loss = F.nll_loss(output.reshape(batch_size, 5, 1), rl)
+            if output.shape[0] != batch_size:
+                continue
+            
+            samples_per_cls = count_class(rl, 5)
+            loss = CB_loss(rl.reshape(batch_size,).cpu(), output.cpu(), samples_per_cls, 5, "focal", 0.9999, 2)
+            #loss = F.nll_loss(output.reshape(batch_size, 5, 1), rl)
+
             # rl = F.one_hot(rl.to(torch.int64), 5)
             loss.backward()
             optimizer.step()
@@ -45,7 +53,7 @@ def train(dataloader, batch_size, epochs):
 
 
             estimate = output.argmax(-1)
-            count += 32
+            count += batch_size
             for i in range(batch_size):
                 if int(estimate[i])==int(rl[i]):
                     correct += 1
@@ -61,7 +69,7 @@ def train(dataloader, batch_size, epochs):
 
             
 
-train(dataloader, 32, 5)
+train(dataloader, batch_size, 5)
 
 
 
