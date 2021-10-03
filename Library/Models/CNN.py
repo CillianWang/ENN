@@ -32,20 +32,24 @@ class Passthrough(nn.Module):
         self.conv1 = nn.Conv1d(8, 16, 15)
         self.conv2 = nn.Conv1d(16, 32, 9)
         self.conv3 = nn.Conv1d(32, 64, 5)
-        self.conv4 = nn.Conv1d(64, 128, 7, stride=3)
+        self.conv4 = nn.Conv1d(64, 128, 3)
         self.conv5 = nn.Conv1d(128, 64, 7, stride=3)
+        
         self.flat = nn.Flatten(1, -1)
-        self.fc = nn.Linear(3840, 5)
+        self.fc = nn.Linear(128*5, 5)
         self.maxpool = nn.MaxPool1d(5, stride=5)
         self.leakyrelu = nn.LeakyReLU(0.01)
         self.dropout = nn.Dropout(p=0.1)
+        self.softmax = nn.LogSoftmax()
+        self.avgpool = nn.AdaptiveAvgPool1d(5)
         
         
     def forward(self, x):
         x = self.dropout(self.maxpool(self.leakyrelu(self.conv1(x))))
         x = self.dropout(self.maxpool(self.leakyrelu(self.conv2(x))))
         x = self.dropout(self.maxpool(self.leakyrelu(self.conv3(x))))
-        x = F.softmax(self.fc(self.flat(x)))
+        x = self.avgpool(self.conv4(x))
+        x = self.softmax(self.fc(self.flat(x)))
 
         # x = nn.MaxPool1d(5,5)
         # x = F.relu(self.conv2(x))
