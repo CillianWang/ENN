@@ -19,7 +19,7 @@ a = x_i[0:500]
 b = x_i[699:999]
 x = np.hstack((a,b))
 
-noise = np.random.normal(0, 1, 1000)
+noise = np.random.normal(0, 3, 1000)
 noise_index = np.where(x_i<7, 1, 10)
 noise = noise_index*noise
 
@@ -71,20 +71,21 @@ class ENN(nn.Module):
     
     def Linear(self, x, w_mu, w_sigma, b_mu, b_sigma):
         # keep the size
+        e = 1
         insize = w_mu.shape[0]
         outsize = w_mu.shape[1]
 
         w_shape = torch.empty(insize, outsize)
         b_shape = torch.empty(1, outsize)
 
-        w_prior = torch.normal(mean=torch.zeros_like(w_shape)+self.z_mu, std=torch.ones_like(w_shape)*self.z_sigma)
-        b_prior = torch.normal(mean=torch.zeros_like(b_shape)+self.z_mu, std=torch.ones_like(b_shape)*self.z_sigma)
+        w_prior = torch.normal(mean=torch.zeros_like(w_shape)+self.z_mu, std=e*torch.ones_like(w_shape)*self.z_sigma)
+        b_prior = torch.normal(mean=torch.zeros_like(b_shape)+self.z_mu, std=e*torch.ones_like(b_shape)*self.z_sigma)
         
         # ENN's true weight and bias
         w = w_sigma*w_prior+w_mu
         b = b_sigma*b_prior+b_mu
 
-        loss = self.KL_2gaussian(w_mu, w_sigma, torch.zeros_like(w_shape), torch.ones_like(w_sigma))
+        loss = self.KL_2gaussian(w_mu, w_sigma, torch.zeros_like(w_shape), 0.01*torch.ones_like(w_sigma))*w_mu.shape[0]*w_mu.shape[1] + self.KL_2gaussian(b_mu, b_sigma, torch.zeros_like(b_shape), 0.01*torch.ones_like(b_sigma))*b_mu.shape[0]*b_mu.shape[1]
 
         output = torch.mm(x.double(), w.double()) + b.double()
 
@@ -113,14 +114,14 @@ class ENN(nn.Module):
         # output = F.relu(output)
         # output, loss = self.Linear(output, self.w_mu5, self.w_sigma5, self.b_mu5, self.b_sigma5)
         # kl_loss += loss
-        kl_loss = kl_loss/(self.l1+self.l1+self.l2+self.l2*self.l1)
+        kl_loss = kl_loss/2/(self.l1+self.l1+self.l2+self.l2*self.l1 + self.l3 + self.l3*self.l2)
         
         # kl_loss = kl_loss/(self.l1 + self.l2 + self.l3 + self.l4 +self.l1+self.l2*self.l1+self.l2*self.l3 + self.l3*self.l4)
         return output, kl_loss
 
 
 a = 1
-net = ENN(0, 0.001, 32, 64, 32, 16)
+net = ENN(0, 1, 32, 64, 32, 16)
 b, c = net(a)
 
 
@@ -156,7 +157,7 @@ def train(model, train_data, optimizer, noise):
 
     # print(net.a_mu, net.a_sigma)
 
-for i in range(200):
+for i in range(100):
     train(net, x, optimizer, noise)
 
 # kl = KL_2gaussian(torch.abs(net.a_mu), torch.abs(net.a_sigma), torch.tensor(4.5), torch.tensor(0.5))
@@ -168,7 +169,7 @@ y = []
 y_low = []
 y_up = []
 n = 1
-for i in np.linspace(-10, 10, 1000):
+for i in np.linspace(-10, 20, 1000):
     # simple estimation:
     # alpha = torch.normal(mean = net.a_mu, std = abs(net.a_sigma))
     # y.append(float(alpha)*i)
